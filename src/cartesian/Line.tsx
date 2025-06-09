@@ -1,6 +1,16 @@
 // eslint-disable-next-line max-classes-per-file
 import * as React from 'react';
-import { Component, MutableRefObject, PureComponent, Ref, useCallback, useMemo, useRef, useState } from 'react';
+import {
+  Component,
+  MutableRefObject,
+  PureComponent,
+  Ref,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useEffect,
+} from 'react';
 import Animate from 'react-smooth';
 
 import { clsx } from 'clsx';
@@ -33,7 +43,7 @@ import { useChartLayout, useOffset } from '../context/chartLayoutContext';
 import { BaseAxisWithScale } from '../state/selectors/axisSelectors';
 import { useIsPanorama } from '../context/PanoramaContext';
 import { ResolvedLineSettings, selectLinePoints } from '../state/selectors/lineSelectors';
-import { useAppSelector } from '../state/hooks';
+import { useAppSelector, useZoomAnimationDisabled } from '../state/hooks';
 import { AxisId } from '../state/cartesianAxisSlice';
 import { SetLegendPayload } from '../state/SetLegendPayload';
 import { AreaPointItem } from '../state/selectors/areaSelectors';
@@ -613,6 +623,11 @@ function LineImpl(props: Props) {
   const { needClip } = useNeedsClip(xAxisId, yAxisId);
   const { height, width, left, top } = useOffset();
   const layout = useChartLayout();
+  const zoomDisabled = useZoomAnimationDisabled();
+  const firstRender = useRef(true);
+  useEffect(() => {
+    firstRender.current = false;
+  }, []);
   const isPanorama = useIsPanorama();
   const lineSettings: ResolvedLineSettings = useMemo(
     () => ({ dataKey: props.dataKey, data: props.data }),
@@ -626,6 +641,8 @@ function LineImpl(props: Props) {
     return null;
   }
 
+  const effectiveIsAnimationActive = isAnimationActive && (!zoomDisabled || firstRender.current);
+
   return (
     <LineWithState
       {...everythingElse}
@@ -636,7 +653,7 @@ function LineImpl(props: Props) {
       animationBegin={animationBegin}
       animationDuration={animationDuration}
       animationEasing={animationEasing}
-      isAnimationActive={isAnimationActive}
+      isAnimationActive={effectiveIsAnimationActive}
       hide={hide}
       label={label}
       legendType={legendType}

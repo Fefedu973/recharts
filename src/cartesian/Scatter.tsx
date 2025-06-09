@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Component, MutableRefObject, ReactElement, useCallback, useMemo, useRef, useState } from 'react';
+import { Component, MutableRefObject, ReactElement, useCallback, useMemo, useRef, useState, useEffect } from 'react';
 import Animate from 'react-smooth';
 
 import { clsx } from 'clsx';
@@ -40,7 +40,7 @@ import { CartesianGraphicalItemContext, SetErrorBarContext } from '../context/Ca
 import { AxisId } from '../state/cartesianAxisSlice';
 import { GraphicalItemClipPath, useNeedsClip } from './GraphicalItemClipPath';
 import { ResolvedScatterSettings, selectScatterPoints } from '../state/selectors/scatterSelectors';
-import { useAppSelector } from '../state/hooks';
+import { useAppSelector, useZoomAnimationDisabled } from '../state/hooks';
 import { BaseAxisWithScale, ZAxisWithScale } from '../state/selectors/axisSelectors';
 import { useIsPanorama } from '../context/PanoramaContext';
 import { selectActiveTooltipIndex } from '../state/selectors/tooltipSelectors';
@@ -565,6 +565,11 @@ function ScatterImpl(props: Props) {
   } = resolveDefaultProps(props, defaultScatterProps);
 
   const { needClip } = useNeedsClip(xAxisId, yAxisId);
+  const zoomDisabled = useZoomAnimationDisabled();
+  const firstRender = useRef(true);
+  useEffect(() => {
+    firstRender.current = false;
+  }, []);
   const cells = useMemo(() => findAllByType(props.children, Cell), [props.children]);
 
   const scatterSettings: ResolvedScatterSettings = useMemo(
@@ -597,7 +602,7 @@ function ScatterImpl(props: Props) {
         legendType={legendType}
         shape={shape}
         hide={hide}
-        isAnimationActive={isAnimationActive}
+        isAnimationActive={isAnimationActive && (!zoomDisabled || firstRender.current)}
         animationBegin={animationBegin}
         animationDuration={animationDuration}
         animationEasing={animationEasing}

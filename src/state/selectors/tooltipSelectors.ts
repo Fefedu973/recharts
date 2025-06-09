@@ -39,6 +39,8 @@ import {
 import { selectChartLayout } from '../../context/chartLayoutContext';
 import { AxisId } from '../cartesianAxisSlice';
 import { isCategoricalAxis, RechartsScale, StackId } from '../../util/ChartUtils';
+import { selectZoomState } from './zoomSelectors';
+import { applyZoomToScale } from '../../util/applyZoomToScale';
 import {
   AxisDomain,
   CategoricalDomain,
@@ -262,8 +264,21 @@ export const selectTooltipAxisScale: (state: RechartsRootState) => RechartsScale
     selectTooltipAxisRealScaleType,
     selectTooltipAxisDomainIncludingNiceTicks,
     selectTooltipAxisRangeWithReverse,
+    selectZoomState,
+    selectTooltipAxisType,
   ],
-  combineScaleFunction,
+  (axis, realScaleType, domain, range, zoom, axisType) => {
+    const base = combineScaleFunction(axis, realScaleType, domain, range as [number, number]);
+    if (!base || !zoom) return base;
+    const [r0, r1] = range ?? base.range();
+    if (axisType === 'xAxis') {
+      return applyZoomToScale(base, zoom.scaleX, zoom.offsetX, [r0 as number, r1 as number]);
+    }
+    if (axisType === 'yAxis') {
+      return applyZoomToScale(base, zoom.scaleY, zoom.offsetY, [r0 as number, r1 as number]);
+    }
+    return base;
+  },
 );
 
 const selectTooltipDuplicateDomain: (state: RechartsRootState) => ReadonlyArray<unknown> | undefined = createSelector(
@@ -306,27 +321,35 @@ const combineTicksOfTooltipAxis = (
       ? mathSign(range[0] - range[1]) * 2 * offset
       : offset;
 
-  // When axis is a categorical axis, but the type of axis is number or the scale of axis is not "auto"
-  if (isCategorical && categoricalDomain) {
-    return categoricalDomain.map(
+  const ticks = ((): ReadonlyArray<TickItem> => {
+    if (isCategorical && categoricalDomain) {
+      return categoricalDomain.map(
+        (entry: any, index: number): TickItem => ({
+          coordinate: scale(entry) + offset,
+          value: entry,
+          index,
+          offset,
+        }),
+      );
+    }
+
+    if (scale.ticks) {
+      return scale
+        .ticks(axis.tickCount)
+        .map((entry: any, index: number): TickItem => ({ coordinate: scale(entry) + offset, value: entry, offset, index }));
+    }
+
+    return scale.domain().map(
       (entry: any, index: number): TickItem => ({
         coordinate: scale(entry) + offset,
-        value: entry,
+        value: duplicateDomain ? duplicateDomain[entry] : entry,
         index,
         offset,
       }),
     );
-  }
+  })();
 
-  // When axis has duplicated text, serial numbers are used to generate scale
-  return scale.domain().map(
-    (entry: any, index: number): TickItem => ({
-      coordinate: scale(entry) + offset,
-      value: duplicateDomain ? duplicateDomain[entry] : entry,
-      index,
-      offset,
-    }),
-  );
+  return ticks;
 };
 
 export const selectTooltipAxisTicks: (state: RechartsRootState) => ReadonlyArray<TickItem> | undefined = createSelector(

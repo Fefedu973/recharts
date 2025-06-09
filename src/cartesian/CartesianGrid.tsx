@@ -13,6 +13,7 @@ import { AxisPropsNeededForTicksGenerator, getCoordinatesOfGrid, getTicksOfAxis 
 import { getTicks, GetTicksInput } from './getTicks';
 import { CartesianAxis } from './CartesianAxis';
 import { useChartHeight, useChartWidth, useOffset } from '../context/chartLayoutContext';
+import { useClipPathId } from '../container/ClipPathProvider';
 import { AxisId } from '../state/cartesianAxisSlice';
 import { selectAxisPropsNeededForCartesianGridTicksGenerator } from '../state/selectors/axisSelectors';
 import { useAppSelector } from '../state/hooks';
@@ -379,10 +380,12 @@ export function CartesianGrid(props: Props) {
   const chartWidth = useChartWidth();
   const chartHeight = useChartHeight();
   const offset = useOffset();
+  const isPanorama = useIsPanorama();
+
   const propsIncludingDefaults = {
     ...resolveDefaultProps(props, defaultProps),
-    x: isNumber(props.x) ? props.x : offset.left,
-    y: isNumber(props.y) ? props.y : offset.top,
+    x: isNumber(props.x) ? props.x : isPanorama ? 0 : offset.left,
+    y: isNumber(props.y) ? props.y : isPanorama ? 0 : offset.top,
     width: isNumber(props.width) ? props.width : offset.width,
     height: isNumber(props.height) ? props.height : offset.height,
   };
@@ -390,13 +393,13 @@ export function CartesianGrid(props: Props) {
   const { xAxisId, yAxisId, x, y, width, height, syncWithTicks, horizontalValues, verticalValues } =
     propsIncludingDefaults;
 
-  const isPanorama = useIsPanorama();
   const xAxis: AxisPropsForCartesianGridTicksGeneration = useAppSelector(state =>
     selectAxisPropsNeededForCartesianGridTicksGenerator(state, 'xAxis', xAxisId, isPanorama),
   );
   const yAxis: AxisPropsForCartesianGridTicksGeneration = useAppSelector(state =>
     selectAxisPropsNeededForCartesianGridTicksGenerator(state, 'yAxis', yAxisId, isPanorama),
   );
+  const clipPathId = useClipPathId();
 
   if (
     !isNumber(width) ||
@@ -480,7 +483,7 @@ export function CartesianGrid(props: Props) {
   }
 
   return (
-    <g className="recharts-cartesian-grid">
+    <g className="recharts-cartesian-grid" clipPath={clipPathId && !isPanorama ? `url(#${clipPathId})` : undefined}>
       <Background
         fill={propsIncludingDefaults.fill}
         fillOpacity={propsIncludingDefaults.fillOpacity}

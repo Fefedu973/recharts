@@ -1,6 +1,8 @@
 import { useSyncExternalStoreWithSelector } from 'use-sync-external-store/shim/with-selector';
-import { useContext } from 'react';
+import { useContext, useCallback } from 'react';
 import { type AppDispatch, type RechartsRootState } from './store';
+import { selectDisableZoomAnimation, selectZoomState } from './selectors/zoomSelectors';
+import { setZoom, type ZoomState } from './zoomSlice';
 
 import { RechartsReduxContext } from './RechartsReduxContext';
 
@@ -14,7 +16,7 @@ export const useAppDispatch = (): AppDispatch => {
   return noopDispatch;
 };
 
-const noop = (): undefined => {};
+const noop = (): undefined => { };
 
 const addNestedSubNoop = () => noop;
 
@@ -47,4 +49,17 @@ export function useAppSelector<T>(selector: (state: RechartsRootState) => T): T 
     context ? selector : noop,
     refEquality,
   );
+}
+
+export function useZoomAnimationDisabled(): boolean {
+  return useAppSelector(selectDisableZoomAnimation) ?? false;
+}
+
+export function useZoom(): ZoomState | undefined {
+  return useAppSelector(selectZoomState);
+}
+
+export function useSetZoom(): (z: ZoomState) => void {
+  const dispatch = useAppDispatch();
+  return useCallback((z: ZoomState) => dispatch(setZoom(z)), [dispatch]);
 }

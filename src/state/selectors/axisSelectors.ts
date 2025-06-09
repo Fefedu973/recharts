@@ -38,7 +38,11 @@ import {
   ZAxisSettings,
 } from '../cartesianAxisSlice';
 import { RechartsRootState } from '../store';
-import { selectChartDataWithIndexes, selectChartDataWithIndexesIfNotInPanorama } from './dataSelectors';
+import {
+  selectChartDataWithIndexes,
+  selectChartDataWithIndexesIfNotInPanorama,
+  selectChartDataAndAlwaysIgnoreIndexes,
+} from './dataSelectors';
 import {
   isWellFormedNumberDomain,
   numericalDomainSpecifiedWithoutRequiringData,
@@ -64,7 +68,7 @@ import { selectChartHeight, selectChartWidth } from './containerSelectors';
 import { selectAllXAxes, selectAllYAxes } from './selectAllAxes';
 import { selectChartOffset } from './selectChartOffset';
 import { AxisPropsForCartesianGridTicksGeneration } from '../../cartesian/CartesianGrid';
-import { BrushDimensions, selectBrushDimensions, selectBrushSettings } from './brushSelectors';
+import { BrushDimensions, selectDefaultBrushDimensions, selectAllBrushSettings } from './brushSelectors';
 import { selectBarCategoryGap, selectChartName, selectStackOffsetType } from './rootPropsSelectors';
 import { selectAngleAxis, selectAngleAxisRange, selectRadiusAxis, selectRadiusAxisRange } from './polarAxisSelectors';
 import { AngleAxisSettings, RadiusAxisSettings } from '../polarAxisSlice';
@@ -72,6 +76,8 @@ import { pickAxisType } from './pickAxisType';
 import { pickAxisId } from './pickAxisId';
 import { MaybeStackedGraphicalItem } from './barSelectors';
 import { combineAxisRangeWithReverse } from './combiners/combineAxisRangeWithReverse';
+import { applyZoomToScale } from '../../util/applyZoomToScale';
+import { selectZoomState } from './zoomSelectors';
 
 const defaultNumericDomain: AxisDomain = [0, 'auto'];
 
@@ -916,8 +922,49 @@ export const selectAxisDomain: (
     selectStackOffsetType,
     pickAxisType,
     selectNumericalDomain,
+    selectZoomState,
+    selectChartWidth,
+    selectChartDataAndAlwaysIgnoreIndexes,
+    (state, axisType, axisId, isPanorama) => isPanorama, // Extract isPanorama
   ],
-  combineAxisDomain,
+  (
+    axisSettings: BaseCartesianAxis,
+    layout: LayoutType,
+    displayedData: ChartData,
+    allValues: AppliedChartData,
+    stackOffsetType: StackOffsetType,
+    axisType: XorYorZType,
+    numericalDomain: NumberDomain | undefined,
+    zoom,
+    width: number,
+    fullData: ChartDataState,
+    isPanorama: boolean,
+  ) => {
+    let domain = combineAxisDomain(
+      axisSettings,
+      layout,
+      displayedData,
+      allValues,
+      stackOffsetType,
+      axisType,
+      numericalDomain,
+    );
+    // Don't apply auto-scale Y domain logic in panorama mode (brush previews)
+    if (axisType === 'yAxis' && zoom?.autoScaleYDomain && !isPanorama && fullData.chartData && fullData.chartData.length > 1) {
+      const dataLen = fullData.chartData.length;
+      const step = width / dataLen;
+      const startIdx = Math.max(0, Math.floor(-zoom.offsetX / (step * zoom.scaleX)));
+      const endIdx = Math.min(dataLen - 1, Math.ceil((-zoom.offsetX + width) / (step * zoom.scaleX)) - 1);
+      const slice = allValues
+        .slice(startIdx, endIdx + 1)
+        .map(v => Number(v.value))
+        .filter(isNumber);
+      if (slice.length > 0) {
+        domain = [Math.min(...slice), Math.max(...slice)];
+      }
+    }
+    return domain;
+  },
 );
 
 export const combineRealScaleType = (
@@ -1220,17 +1267,19 @@ export const combineXAxisRange: (
   [
     selectChartOffset,
     selectXAxisPadding,
-    selectBrushDimensions,
-    selectBrushSettings,
+    selectDefaultBrushDimensions,
+    selectAllBrushSettings,
     (_state: RechartsRootState, _axisId: AxisId, isPanorama) => isPanorama,
   ],
   (
     offset: ChartOffsetRequired,
     padding,
     brushDimensions: BrushDimensions,
-    { padding: brushPadding },
+    allBrushSettings: Record<string, any>,
     isPanorama: boolean,
   ): AxisRange | undefined => {
+    const firstBrushSettings = Object.values(allBrushSettings)[0];
+    const brushPadding = firstBrushSettings?.padding || { left: 0, right: 0, top: 0, bottom: 0 };
     if (isPanorama) {
       return [brushPadding.left, brushDimensions.width - brushPadding.right];
     }
@@ -1249,8 +1298,8 @@ export const combineYAxisRange: (
     selectChartOffset,
     selectChartLayout,
     selectYAxisPadding,
-    selectBrushDimensions,
-    selectBrushSettings,
+    selectDefaultBrushDimensions,
+    selectAllBrushSettings,
     (_state: RechartsRootState, _axisId: AxisId, isPanorama) => isPanorama,
   ],
   (
@@ -1258,9 +1307,11 @@ export const combineYAxisRange: (
     layout: LayoutType,
     padding: { top: number; bottom: number },
     brushDimensions: BrushDimensions,
-    { padding: brushPadding },
+    allBrushSettings: Record<string, any>,
     isPanorama: boolean,
   ): AxisRange | undefined => {
+    const firstBrushSettings = Object.values(allBrushSettings)[0];
+    const brushPadding = firstBrushSettings?.padding || { left: 0, right: 0, top: 0, bottom: 0 };
     if (isPanorama) {
       return [brushDimensions.height - brushPadding.bottom, brushPadding.top];
     }
@@ -1306,8 +1357,29 @@ export const selectAxisScale: (
   axisId: AxisId,
   isPanorama: boolean,
 ) => RechartsScale | undefined = createSelector(
-  [selectBaseAxis, selectRealScaleType, selectAxisDomainIncludingNiceTicks, selectAxisRangeWithReverse],
-  combineScaleFunction,
+  [
+    selectBaseAxis,
+    selectRealScaleType,
+    selectAxisDomainIncludingNiceTicks,
+    selectAxisRangeWithReverse,
+    selectZoomState,
+    pickAxisType,
+    (state, axisType, axisId, isPanorama) => isPanorama, // Extract isPanorama
+  ],
+  (axis, realScaleType, domain, axisRangeParam, zoom, axisType, isPanorama) => {
+    const base = combineScaleFunction(axis, realScaleType, domain, axisRangeParam as [number, number]);
+    if (!base) return base;
+    // Don't apply zoom transformations in panorama mode (brush previews)
+    if (!zoom || isPanorama) return base;
+    const [r0, r1] = axisRangeParam ?? base.range();
+    if (axisType === 'xAxis') {
+      return applyZoomToScale(base, zoom.scaleX, zoom.offsetX, [r0 as number, r1 as number]);
+    }
+    if (axisType === 'yAxis') {
+      return applyZoomToScale(base, zoom.scaleY, zoom.offsetY, [r0 as number, r1 as number]);
+    }
+    return base;
+  },
 );
 
 export const selectErrorBarsSettings = createSelector(
@@ -1683,39 +1755,53 @@ export const combineAxisTicks = (
       };
     });
 
-    return result.filter((row: TickItem) => !isNan(row.coordinate));
+    const filtered = result.filter((row: TickItem) => !isNan(row.coordinate));
+    if (axisRange) {
+      const [r0, r1] = axisRange;
+      const min = Math.min(r0, r1);
+      const max = Math.max(r0, r1);
+      return filtered.filter(t => t.coordinate >= min && t.coordinate <= max);
+    }
+    return filtered;
   }
 
   // When axis is a categorical axis, but the type of axis is number or the scale of axis is not "auto"
-  if (isCategorical && categoricalDomain) {
-    return categoricalDomain.map(
+  const ticksArr: ReadonlyArray<TickItem> = ((): ReadonlyArray<TickItem> => {
+    if (isCategorical && categoricalDomain) {
+      return categoricalDomain.map(
+        (entry: any, index: number): TickItem => ({
+          coordinate: scale(entry) + offset,
+          value: entry,
+          index,
+          offset,
+        }),
+      );
+    }
+
+    if (scale.ticks) {
+      return scale
+        .ticks(tickCount)
+        .map((entry: any, index: number): TickItem => ({ coordinate: scale(entry) + offset, value: entry, offset, index }));
+    }
+
+    return scale.domain().map(
       (entry: any, index: number): TickItem => ({
         coordinate: scale(entry) + offset,
-        value: entry,
+        value: duplicateDomain ? duplicateDomain[entry] : entry,
         index,
         offset,
       }),
     );
+  })();
+
+  if (axisRange) {
+    const [r0, r1] = axisRange;
+    const min = Math.min(r0, r1);
+    const max = Math.max(r0, r1);
+    return ticksArr.filter(t => t.coordinate >= min && t.coordinate <= max);
   }
 
-  if (scale.ticks) {
-    return (
-      scale
-        .ticks(tickCount)
-        // @ts-expect-error why does the offset go here? The type does not require it
-        .map((entry: any): TickItem => ({ coordinate: scale(entry) + offset, value: entry, offset }))
-    );
-  }
-
-  // When axis has duplicated text, serial numbers are used to generate scale
-  return scale.domain().map(
-    (entry: any, index: number): TickItem => ({
-      coordinate: scale(entry) + offset,
-      value: duplicateDomain ? duplicateDomain[entry] : entry,
-      index,
-      offset,
-    }),
-  );
+  return ticksArr;
 };
 export const selectTicksOfAxis: (
   state: RechartsRootState,
@@ -1771,12 +1857,9 @@ export const combineGraphicalItemTicks = (
   }
 
   if (scale.ticks) {
-    return (
-      scale
-        .ticks(tickCount)
-        // @ts-expect-error why does the offset go here? The type does not require it
-        .map((entry: any): TickItem => ({ coordinate: scale(entry) + offset, value: entry, offset }))
-    );
+    return scale
+      .ticks(tickCount)
+      .map((entry: any, index: number): TickItem => ({ coordinate: scale(entry) + offset, value: entry, offset, index }));
   }
 
   // When axis has duplicated text, serial numbers are used to generate scale

@@ -22,6 +22,7 @@ import {
 import { filterProps } from '../util/ReactUtils';
 import { getTicks } from './getTicks';
 import { RechartsScale } from '../util/ChartUtils';
+import { useAxisInteraction } from '../context/zoomPanContext';
 
 /** The orientation of the axis in correspondence to the chart */
 export type Orientation = 'top' | 'bottom' | 'left' | 'right';
@@ -78,7 +79,99 @@ interface IState {
 export type Props = Omit<PresentationAttributesAdaptChildEvent<any, SVGElement>, 'viewBox' | 'scale'> &
   CartesianAxisProps;
 
-export class CartesianAxis extends Component<Props, IState> {
+// Functional component wrapper to use hooks
+const CartesianAxisWithHooks: React.FC<Props> = (props) => {
+  const [fontSize, setFontSize] = React.useState('');
+  const [letterSpacing, setLetterSpacing] = React.useState('');
+  const axisRef = React.useRef<HTMLDivElement>(null);
+  
+  // Get axis interaction context
+  const axisInteraction = useAxisInteraction();
+  
+  // Determine axis type for interactions
+  const axisType: 'x' | 'y' = props.orientation === 'left' || props.orientation === 'right' ? 'y' : 'x';
+  const isInteractionEnabled = axisInteraction?.isLabelInteractionEnabled;
+
+  // Add native event listeners to prevent page scroll but allow axis interactions
+  React.useEffect(() => {
+    const handleGlobalWheel = (e: WheelEvent) => {
+      const target = e.target as Element;
+      // Check if the target is within our axis
+      if (target.closest('.recharts-cartesian-axis')) {
+        e.preventDefault();
+        // Don't stop propagation - let the axis interaction handlers work
+      }
+    };
+    
+    const handleGlobalTouch = (e: Event) => {
+      const target = e.target as Element;
+      // Check if the target is within our axis
+      if (target.closest('.recharts-cartesian-axis')) {
+        e.preventDefault();
+        // Don't stop propagation - let the axis interaction handlers work
+      }
+    };
+    
+    // Add global listeners to capture all wheel/touch events on axis
+    document.addEventListener('wheel', handleGlobalWheel, { passive: false, capture: true });
+    document.addEventListener('touchstart', handleGlobalTouch, { passive: false, capture: true });
+    document.addEventListener('touchmove', handleGlobalTouch, { passive: false, capture: true });
+    
+    return () => {
+      document.removeEventListener('wheel', handleGlobalWheel);
+      document.removeEventListener('touchstart', handleGlobalTouch);
+      document.removeEventListener('touchmove', handleGlobalTouch);
+    };
+  }, []);
+
+  // Use effect to measure font size after render
+  React.useEffect(() => {
+    const measureFontSize = () => {
+      // Search in the document for tick values with a class that contains our axis orientation
+      const ticks = document.getElementsByClassName('recharts-cartesian-axis-tick-value');
+      
+      if (ticks.length > 0) {
+        const tick = ticks[0] as HTMLElement;
+        const calculatedFontSize = window.getComputedStyle(tick).fontSize;
+        const calculatedLetterSpacing = window.getComputedStyle(tick).letterSpacing;
+        
+        if (calculatedFontSize !== fontSize || calculatedLetterSpacing !== letterSpacing) {
+          setFontSize(calculatedFontSize);
+          setLetterSpacing(calculatedLetterSpacing);
+        }
+      }
+    };
+
+    // Measure immediately and after a short delay to ensure DOM is ready
+    measureFontSize();
+    const timeoutId = setTimeout(measureFontSize, 100);
+    
+    return () => clearTimeout(timeoutId);
+  }, [fontSize, letterSpacing, props.ticks]); // Re-run when ticks change
+
+  const { ref, ...restProps } = props;
+
+  return (
+    <CartesianAxisClass
+      {...restProps}
+      fontSize={fontSize}
+      letterSpacing={letterSpacing}
+      axisInteraction={axisInteraction}
+      axisType={axisType}
+      isInteractionEnabled={isInteractionEnabled}
+    />
+  );
+};
+
+interface EnhancedProps extends Props {
+  fontSize: string;
+  letterSpacing: string;
+  axisInteraction: any;
+  axisType: 'x' | 'y';
+  isInteractionEnabled: boolean;
+}
+
+export class CartesianAxisClass extends Component<EnhancedProps, IState> {
   static displayName = 'CartesianAxis';
 
   static defaultProps: Partial<Props> = {
@@ -105,17 +198,19 @@ export class CartesianAxis extends Component<Props, IState> {
     interval: 'preserveEnd',
   };
 
-  constructor(props: Props) {
+  constructor(props: EnhancedProps) {
     super(props);
-    this.state = { fontSize: '', letterSpacing: '' };
+    this.state = { fontSize: props.fontSize, letterSpacing: props.letterSpacing };
   }
 
-  shouldComponentUpdate({ viewBox, ...restProps }: Props, nextState: IState) {
+  shouldComponentUpdate({ viewBox, fontSize, letterSpacing, ...restProps }: EnhancedProps, nextState: IState) {
     // props.viewBox is sometimes generated every time -
     // check that specially as object equality is likely to fail
-    const { viewBox: viewBoxOld, ...restPropsOld } = this.props;
+    const { viewBox: viewBoxOld, fontSize: fontSizeOld, letterSpacing: letterSpacingOld, ...restPropsOld } = this.props;
     return (
       !shallowEqual(viewBox, viewBoxOld) ||
+      fontSize !== fontSizeOld ||
+      letterSpacing !== letterSpacingOld ||
       !shallowEqual(restProps, restPropsOld) ||
       !shallowEqual(nextState, this.state)
     );
@@ -270,7 +365,7 @@ export class CartesianAxis extends Component<Props, IState> {
     letterSpacing: string,
     ticks: ReadonlyArray<CartesianTickItem> = [],
   ): React.ReactElement | null {
-    const { tickLine, stroke, tick, tickFormatter, unit } = this.props;
+    const { tickLine, stroke, tick, tickFormatter, unit, axisInteraction, axisType, isInteractionEnabled } = this.props;
     // @ts-expect-error some properties are optional in props but required in getTicks
     const finalTicks = getTicks({ ...this.props, ticks }, fontSize, letterSpacing);
     const textAnchor = this.getTickTextAnchor();
@@ -298,6 +393,16 @@ export class CartesianAxis extends Component<Props, IState> {
         tickFormatter,
       };
 
+      const tickElement = tick && CartesianAxisClass.renderTickItem(
+        tick,
+        tickProps,
+        `${typeof tickFormatter === 'function' ? tickFormatter(entry.value, i) : entry.value}${unit || ''}`,
+      );
+
+      // No longer wrap individual ticks - use the zone-based interaction instead
+      // This prevents individual labels from interfering with interactions
+      const interactiveTickElement = tickElement;
+
       return (
         <Layer
           className="recharts-cartesian-axis-tick"
@@ -311,12 +416,7 @@ export class CartesianAxis extends Component<Props, IState> {
               className={clsx('recharts-cartesian-axis-tick-line', get(tickLine, 'className'))}
             />
           )}
-          {tick &&
-            CartesianAxis.renderTickItem(
-              tick,
-              tickProps,
-              `${typeof tickFormatter === 'function' ? tickFormatter(entry.value, i) : entry.value}${unit || ''}`,
-            )}
+          {interactiveTickElement}
         </Layer>
       );
     });
@@ -324,8 +424,94 @@ export class CartesianAxis extends Component<Props, IState> {
     return items.length > 0 ? <g className="recharts-cartesian-axis-ticks">{items}</g> : null;
   }
 
+  renderAxisInteractionZone() {
+    const { x, y, width, height, orientation, axisInteraction, axisType, isInteractionEnabled } = this.props;
+    
+    if (!isInteractionEnabled || !axisInteraction) {
+      return null;
+    }
+
+    // Calculate the interaction zone based on orientation
+    let zoneX, zoneY, zoneWidth, zoneHeight;
+    const expandedSize = 30; // Expand the interaction zone beyond the axis
+
+    switch (orientation) {
+      case 'bottom':
+        zoneX = x;
+        zoneY = y;
+        zoneWidth = width;
+        zoneHeight = height + expandedSize;
+        break;
+      case 'top':
+        zoneX = x;
+        zoneY = y - expandedSize;
+        zoneWidth = width;
+        zoneHeight = height + expandedSize;
+        break;
+      case 'left':
+        zoneX = x - expandedSize;
+        zoneY = y;
+        zoneWidth = width + expandedSize;
+        zoneHeight = height;
+        break;
+      case 'right':
+        zoneX = x;
+        zoneY = y;
+        zoneWidth = width + expandedSize;
+        zoneHeight = height;
+        break;
+      default:
+        return null;
+    }
+
+    return (
+      <rect
+        x={zoneX}
+        y={zoneY}
+        width={zoneWidth}
+        height={zoneHeight}
+        fill="transparent"
+        pointerEvents="all"
+        style={{
+          cursor: 'grab',
+          touchAction: 'none',
+        }}
+        onWheel={(e) => {
+          // Page scroll is already prevented by native listeners
+          // Handle the axis wheel event if available
+          if (axisInteraction.handleAxisWheel) {
+            axisInteraction.handleAxisWheel(e, axisType);
+          }
+        }}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          axisInteraction.handleAxisDrag?.(e, axisType, 'start');
+        }}
+        onPointerMove={(e) => {
+          axisInteraction.handleAxisDrag?.(e, axisType, 'move');
+        }}
+        onPointerUp={(e) => {
+          axisInteraction.handleAxisDrag?.(e, axisType, 'end');
+        }}
+        onPointerCancel={(e) => {
+          axisInteraction.handleAxisDrag?.(e, axisType, 'end');
+        }}
+        onTouchStart={(e) => {
+          axisInteraction.handleAxisTouch?.(e, axisType, 'start');
+        }}
+        onTouchMove={(e) => {
+          axisInteraction.handleAxisTouch?.(e, axisType, 'move');
+        }}
+        onTouchEnd={(e) => {
+          axisInteraction.handleAxisTouch?.(e, axisType, 'end');
+        }}
+      />
+    );
+  }
+
   render() {
-    const { axisLine, width, height, className, hide } = this.props;
+    const { axisLine, width, height, className, hide, fontSize, letterSpacing } = this.props;
 
     if (hide) {
       return null;
@@ -342,28 +528,15 @@ export class CartesianAxis extends Component<Props, IState> {
     }
 
     return (
-      <Layer
-        className={clsx('recharts-cartesian-axis', className)}
-        ref={ref => {
-          if (ref) {
-            const tick: Element | undefined = ref.getElementsByClassName('recharts-cartesian-axis-tick-value')[0];
-            if (tick) {
-              const calculatedFontSize = window.getComputedStyle(tick).fontSize;
-              const calculatedLetterSpacing = window.getComputedStyle(tick).letterSpacing;
-              if (calculatedFontSize !== this.state.fontSize || calculatedLetterSpacing !== this.state.letterSpacing) {
-                this.setState({
-                  fontSize: window.getComputedStyle(tick).fontSize,
-                  letterSpacing: window.getComputedStyle(tick).letterSpacing,
-                });
-              }
-            }
-          }
-        }}
-      >
+      <Layer className={clsx('recharts-cartesian-axis', className)}>
         {axisLine && this.renderAxisLine()}
-        {this.renderTicks(this.state.fontSize, this.state.letterSpacing, ticks)}
+        {this.renderTicks(fontSize, letterSpacing, ticks)}
         {Label.renderCallByParent(this.props)}
+        {this.renderAxisInteractionZone()}
       </Layer>
     );
   }
 }
+
+// Export the wrapped component as the main CartesianAxis
+export const CartesianAxis = CartesianAxisWithHooks;

@@ -59,6 +59,8 @@ export type { RadialBarProps } from './polar/RadialBar';
 
 export { Brush } from './cartesian/Brush';
 export type { Props as BrushProps } from './cartesian/Brush';
+export { Minimap } from './cartesian/Minimap';
+export type { Props as MinimapProps } from './cartesian/Minimap';
 export { ReferenceLine } from './cartesian/ReferenceLine';
 export type { Props as ReferenceLineProps } from './cartesian/ReferenceLine';
 export { ReferenceDot } from './cartesian/ReferenceDot';
@@ -114,3 +116,7 @@ export { getNiceTickValues } from './util/scale/getNiceTickValues';
 export { useActiveTooltipLabel } from './hooks';
 
 export { useChartHeight, useChartWidth } from './context/chartLayoutContext';
+export { useZoomAnimationDisabled, useZoom, useSetZoom } from './state/hooks';
+export { ZoomPanContainer } from './context/zoomPanContext';
+export type { ZoomConfig } from './context/zoomPanContext';
+export { ClipChartRect } from './container/ClipPathProvider';

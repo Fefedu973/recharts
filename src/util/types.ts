@@ -1455,6 +1455,22 @@ export interface ChartPointer {
   chartY: number;
 }
 
+export interface ZoomConfig {
+  mode?: 'x' | 'y' | 'xy';
+  minScale?: number;
+  maxScale?: number;
+  onZoomChange?: (state: { scaleX: number; scaleY: number; offsetX: number; offsetY: number }) => void;
+  resetKey?: 'dblclick' | 'dbltap';
+  showScrollBar?: boolean;
+  disableAnimation?: boolean;
+  /** Enable selecting an area with Shift+Drag to zoom into */
+  dragToZoom?: boolean;
+  /** Automatically adjust Y domain based on the visible X range */
+  autoScaleYDomain?: boolean;
+  /** Keep a specific line centered when zooming/panning */
+  followLineKey?: string;
+}
+
 export interface CartesianChartProps extends Partial<ExternalMouseEvents> {
   accessibilityLayer?: boolean;
   barCategoryGap?: number | string;
@@ -1479,6 +1495,7 @@ export interface CartesianChartProps extends Partial<ExternalMouseEvents> {
   syncMethod?: SyncMethod;
   tabIndex?: number;
   throttleDelay?: number;
+  zoom?: ZoomConfig;
   title?: string;
   width?: number;
 }

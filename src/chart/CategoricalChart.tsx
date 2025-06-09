@@ -5,6 +5,7 @@ import { RootSurface } from '../container/RootSurface';
 import { RechartsWrapper } from './RechartsWrapper';
 import { ClipPathProvider } from '../container/ClipPathProvider';
 import { CartesianChartProps } from '../util/types';
+import { ZoomPanContainer } from '../context/zoomPanContext';
 
 type CategoricalChartRequiredProps = CartesianChartProps & {
   width: NonNullable<CartesianChartProps['width']>;
@@ -20,7 +21,14 @@ export const CategoricalChart = forwardRef<SVGSVGElement, CategoricalChartRequir
     if (compact) {
       return (
         <RootSurface otherAttributes={attrs} title={title} desc={desc}>
-          {children}
+          {React.Children.map(children, child => {
+            if (React.isValidElement(child)) {
+              // The child is cast to any to allow passing width and height props.
+              // This is a specific solution for the compact chart scenario.
+              return React.cloneElement(child as any, { width, height });
+            }
+            return child;
+          })}
         </RootSurface>
       );
     }
@@ -44,7 +52,13 @@ export const CategoricalChart = forwardRef<SVGSVGElement, CategoricalChartRequir
         onTouchEnd={props.onTouchEnd}
       >
         <RootSurface otherAttributes={attrs} title={title} desc={desc} ref={ref}>
-          <ClipPathProvider>{children}</ClipPathProvider>
+          {props.zoom ? (
+            <ClipPathProvider>
+              <ZoomPanContainer config={props.zoom}>{children}</ZoomPanContainer>
+            </ClipPathProvider>
+          ) : (
+            <ClipPathProvider>{children}</ClipPathProvider>
+          )}
         </RootSurface>
       </RechartsWrapper>
     );
