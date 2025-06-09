@@ -103,6 +103,7 @@ const InteractiveTick: React.FC<InteractiveTickProps> = ({
   axisInteraction,
   axisType,
 }) => {
+  const DRAG_REVERT_THRESHOLD = 5; // pixels
   const pointers = React.useRef(new Map<number, { x: number; y: number }>());
   const pinchStartDistance = React.useRef<number>(0);
   // This ref holds the state of a single-pointer pan gesture, immune to re-renders.
@@ -110,6 +111,7 @@ const InteractiveTick: React.FC<InteractiveTickProps> = ({
     id: number;
     lastX: number;
     lastY: number;
+    totalDelta: number;
   } | null>(null);
 
   const handlePointerMove = (e: PointerEvent) => {
@@ -127,12 +129,14 @@ const InteractiveTick: React.FC<InteractiveTickProps> = ({
           axisType === 'x'
             ? e.clientX - panSession.current.lastX
             : e.clientY - panSession.current.lastY;
-        
-        axisInteraction?.handleAxisPan?.(axisType, delta);
-        
-        // CRITICAL: Update the last position for the next movement calculation.
-        panSession.current.lastX = e.clientX;
-        panSession.current.lastY = e.clientY;
+
+        if (Math.abs(delta) > 0) {
+          axisInteraction?.handleAxisPan?.(axisType, delta);
+          panSession.current.totalDelta += delta;
+          // CRITICAL: Update the last position for the next movement calculation.
+          panSession.current.lastX = e.clientX;
+          panSession.current.lastY = e.clientY;
+        }
       }
     }
     // B. Two-pointer pinch-to-zoom (touch-only)
@@ -158,6 +162,9 @@ const InteractiveTick: React.FC<InteractiveTickProps> = ({
     pointers.current.delete(e.pointerId);
     
     if (panSession.current && panSession.current.id === e.pointerId) {
+      if (Math.abs(panSession.current.totalDelta) < DRAG_REVERT_THRESHOLD) {
+        axisInteraction?.handleAxisPan?.(axisType, -panSession.current.totalDelta);
+      }
       panSession.current = null;
     }
 
@@ -168,6 +175,7 @@ const InteractiveTick: React.FC<InteractiveTickProps> = ({
       panSession.current = null;
       window.removeEventListener('pointermove', handlePointerMove, { capture: true });
       window.removeEventListener('pointerup', handlePointerUp, { capture: true });
+      window.removeEventListener('pointercancel', handlePointerUp, { capture: true });
     }
   };
 
@@ -179,10 +187,11 @@ const InteractiveTick: React.FC<InteractiveTickProps> = ({
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     if (pointers.current.size === 1) {
-      panSession.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY };
+      panSession.current = { id: e.pointerId, lastX: e.clientX, lastY: e.clientY, totalDelta: 0 };
       // Use capture: true to ensure we get ALL events
       window.addEventListener('pointermove', handlePointerMove, { capture: true });
       window.addEventListener('pointerup', handlePointerUp, { capture: true });
+      window.addEventListener('pointercancel', handlePointerUp, { capture: true });
     } else if (pointers.current.size === 2) {
       panSession.current = null;
       const [p1, p2] = Array.from(pointers.current.values());
