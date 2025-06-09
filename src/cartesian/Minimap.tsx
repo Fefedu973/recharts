@@ -313,7 +313,7 @@ function MinimapInternal(props: Props) {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
+        onPointerCancel={handlePointerUp}
       />
     </Layer>
   );

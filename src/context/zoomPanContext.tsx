@@ -968,22 +968,24 @@ export function ZoomPanContainer({ children, config }: { children: ReactNode; co
         return; 
       }
       
-      // Mobile edge scrolling - works even when tooltip is active
+      // Mobile edge scrolling - works even during a single-finger drag
       if (
-        !dragStart.current && // Don't conflict with main drag
         !selectStart.current && // Don't conflict with selection
         pointers.current.size === 1 && // Single finger only
         e.pointerType === 'touch' && // Touch only
         state.scaleX > 1.01 // Only when zoomed
       ) {
         const edgeThreshold = 60;
-        const panAmount = 8;
+        const distFromLeft = localX;
+        const distFromRight = width - localX;
         let panDeltaX = 0;
-        
-        if (localX < edgeThreshold && state.offsetX < 0) {
-          panDeltaX = panAmount;
-        } else if (localX > width - edgeThreshold && state.offsetX > width * (1 - state.scaleX)) {
-          panDeltaX = -panAmount;
+
+        if (distFromLeft < edgeThreshold && state.offsetX < 0) {
+          const ratio = 1 - distFromLeft / edgeThreshold;
+          panDeltaX = Math.ceil(8 + 12 * ratio);
+        } else if (distFromRight < edgeThreshold && state.offsetX > width * (1 - state.scaleX)) {
+          const ratio = 1 - distFromRight / edgeThreshold;
+          panDeltaX = -Math.ceil(8 + 12 * ratio);
         }
 
         if (panDeltaX !== 0) {
@@ -1162,7 +1164,9 @@ export function ZoomPanContainer({ children, config }: { children: ReactNode; co
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerLeave={cleanupInteractionState}
+          onPointerCancel={handlePointerUp}
+          // Avoid cancelling interactions when the pointer briefly leaves the chart area
+          // Cleanup will still happen on pointer up
           onBlur={cleanupInteractionState}
           onKeyDown={handleKeyDown}
           onFocus={handleOverlayFocus}
@@ -1175,7 +1179,6 @@ export function ZoomPanContainer({ children, config }: { children: ReactNode; co
             e.stopPropagation();
           }}
           onPointerUp={() => setIsInteracting(false)}
-          onPointerLeave={() => setIsInteracting(false)}
           >
             {minimapChildren}
           </g>
